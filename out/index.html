@@ -7,10 +7,27 @@
 <body>
 index page
 <br>
-
-<button></button>
+<button id="send_button">send</button>
+<br>
+<button id="close_button">close</button>
 
 <script>
+    const send_message = (e) => {
+        e.preventDefault();
+        const num = Math.random();
+
+        socket.send(num)
+        // socket.send('message', num)
+
+    }
+
+    document.getElementById('send_button').addEventListener('click', send_message);
+    document.getElementById('close_button').addEventListener('click', (e) => {
+        e.preventDefault();
+        socket.close();
+    });
+
+
     const ws_endpoint = 'ws://localhost:3000/api/ws'
     const open_ws = () => {
         return new Promise(resolve => {
@@ -43,8 +60,10 @@ index page
         });
     }
 
-    open_ws(ws_endpoint).then((socket) => {
-        console.log(socket);
+    let socket = null;
+
+    open_ws(ws_endpoint).then((_socket) => {
+        socket = _socket;
     });
 
 </script>

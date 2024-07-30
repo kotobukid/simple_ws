@@ -148,52 +148,69 @@ async fn bind_websocket_events(
     redis_con: Arc<Mutex<Connection>>,
     rx: Arc<Mutex<Receiver<String>>>,
 ) {
+    // let (mut sender, mut receiver) = socket.split();
+    // let sender = Arc::new(Mutex::new(sender));
+
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
 
-    let closed = Arc::new(AtomicBool::new(false));
-
-    let ws_task = {
-        let closed = Arc::clone(&closed);
-
-        tokio::spawn(async move {
-            while let Some(message) = receiver.next().await {
-                match message {
-                    Ok(WsMessage::Text(payload)) => {
-                        let key = &payload.clone();
-                        let mut con = redis_con.lock().await;
-                        redis::cmd("SET").arg(&key).arg(&payload).query::<()>(&mut con).unwrap();
-                        let _: () = con.publish("publish_message", &key).unwrap();
-                    }
-                    Ok(WsMessage::Close(_)) => {
-                        closed.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    Err(err) => eprintln!("Error receiving WebSocket message: {}", err), // Handle errors
-                    _ => continue,
+    while let Some(message) = receiver.next().await {
+        let mut locked_sender = sender.lock().await;
+        match message {
+            Ok(msg) => {
+                // Simply send the received message back.
+                if let Err(err) = locked_sender.send(msg).await {
+                    eprintln!("Error sending WebSocket message: {}", err);
                 }
             }
-        })
-    };
+            Err(err) => eprintln!("Error receiving WebSocket message: {}", err),
+        }
+    }
 
-    let rx_task = {
-        let closed = Arc::clone(&closed);
-
-        tokio::spawn(async move {
-            while let Ok(message) = rx.lock().await.recv() {
-                if closed.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                match sender.lock().await.send(WsMessage::Text(message)).await {
-                    Ok(_) => println!("send success"),
-                    Err(err) => eprintln!("Error sending WebSocket message via receiver: {}", err), // Handle errors
-                }
-            }
-        })
-    };
-
-    tokio::join!(ws_task, rx_task);
+    //
+    // let closed = Arc::new(AtomicBool::new(false));
+    //
+    // let ws_task = {
+    //     let closed = Arc::clone(&closed);
+    //
+    //     tokio::spawn(async move {
+    //         while let Some(message) = receiver.next().await {
+    //             match message {
+    //                 Ok(WsMessage::Text(payload)) => {
+    //                     let key = &payload.clone();
+    //                     let mut con = redis_con.lock().await;
+    //                     redis::cmd("SET").arg(&key).arg(&payload).query::<()>(&mut con).unwrap();
+    //                     let _: () = con.publish("publish_message", &key).unwrap();
+    //                 }
+    //                 Ok(WsMessage::Close(_)) => {
+    //                     closed.store(true, Ordering::Relaxed);
+    //                     break;
+    //                 }
+    //                 Err(err) => eprintln!("Error receiving WebSocket message: {}", err), // Handle errors
+    //                 _ => continue,
+    //             }
+    //         }
+    //     })
+    // };
+    //
+    // let rx_task = {
+    //     let closed = Arc::clone(&closed);
+    //
+    //     tokio::spawn(async move {
+    //         while let Ok(message) = rx.lock().await.recv() {
+    //             if closed.load(Ordering::Relaxed) {
+    //                 break;
+    //             }
+    //
+    //             match sender.lock().await.send(WsMessage::Text(message)).await {
+    //                 Ok(_) => println!("send success"),
+    //                 Err(err) => eprintln!("Error sending WebSocket message via receiver: {}", err), // Handle errors
+    //             }
+    //         }
+    //     })
+    // };
+    //
+    // tokio::join!(ws_task, rx_task);
 }
 
 #[tokio::main]
