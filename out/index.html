@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8"/>
+    <title>ホーム</title>
+</head>
+<body>
+index page
+<br>
+
+<button></button>
+
+<script>
+    const ws_endpoint = 'ws://localhost:3000/api/ws'
+    const open_ws = () => {
+        return new Promise(resolve => {
+            let socket = new WebSocket(ws_endpoint);
+
+            socket.onopen = function (e) {
+                console.log("[open] Connection established");
+                console.log("Sending test message to server");
+                // socket.send("Test message from client");
+
+                resolve(socket);
+            };
+
+            socket.onmessage = (event) => {
+                console.log(`[message] Data received from server: ${event.data}`);
+            };
+
+            socket.onerror = function (error) {
+                console.log(`[error] ${error.message}`);
+            };
+
+            socket.onclose = function (event) {
+                if (event.wasClean) {
+                    console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                } else {
+                    // e.g. server process killed or network down
+                    console.log('[close] Connection died');
+                }
+            };
+        });
+    }
+
+    open_ws(ws_endpoint).then((socket) => {
+        console.log(socket);
+    });
+
+</script>
+</body>
+</html>
