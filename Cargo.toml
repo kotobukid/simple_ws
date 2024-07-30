@@ -17,3 +17,4 @@ tracing-subscriber = "0.3.18"
 tracing = "0.1.40"
 redis = "0.26.0"
 axum = { version = "0.7.5", features = ["ws"] }
+uuid = { version = "1.10.0", features = ["v4"] }

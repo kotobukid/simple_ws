@@ -30,10 +30,11 @@ use std::task::{Context, Poll};
 use futures_util::SinkExt;
 use tower::{BoxError, Service};
 use tracing_subscriber::fmt;
-use futures_util::stream::StreamExt;
+use futures_util::stream::{SplitSink, StreamExt};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, RecvError, Sender};
-
+use axum::extract::ws::Message;
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct MyService;
@@ -101,13 +102,17 @@ async fn serve(app: Router, port: u16, redis_con: Connection, rx: Receiver<Strin
     let redis: Arc<Mutex<Connection>> = Arc::new(Mutex::new(redis_con));
     let rx: Arc<Mutex<Receiver<String>>> = Arc::new(Mutex::new(rx));
 
+    let room_map: Arc<Mutex<HashMap<Uuid, Vec<ManagedSocket>>>> = Arc::new(Mutex::new(HashMap::new())) ;
+
     let layer: Extension<Counter> = Extension(counter);
     let layer_redis: Extension<Arc<Mutex<Connection>>> = Extension(redis);
     let layer_receiver: Extension<Arc<Mutex<Receiver<String>>>> = Extension(rx);
+    let layer_room_map : Extension<Arc<Mutex<HashMap<Uuid, Vec<ManagedSocket>>>>> = Extension(room_map);
 
     let app = app.layer(layer)
         .layer(layer_redis)
         .layer(layer_receiver)
+        .layer(layer_room_map)
         .fallback(handler_404);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -139,26 +144,57 @@ fn using_serve_dir() -> Router {
 async fn websocket_handler(ws: WebSocketUpgrade,
                            Extension(redis_con): Extension<Arc<Mutex<Connection>>>,
                            Extension(rx): Extension<Arc<Mutex<Receiver<String>>>>,
+                           Extension(room_map): Extension<Arc<Mutex<HashMap<Uuid, Vec<ManagedSocket>>>>>
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| bind_websocket_events(socket, redis_con, rx))
+    ws.on_upgrade(|socket| bind_websocket_events(socket, redis_con, rx, room_map))
+}
+
+struct ManagedSocket {
+    uuid: Uuid,
+    // socket: Arc<Mutex<SplitSink<WebSocketStream<TcpStream>, Message>>>,
+    socket: Arc<Mutex<SplitSink<WebSocket, Message>>>,
 }
 
 async fn bind_websocket_events(
     socket: WebSocket,
     redis_con: Arc<Mutex<Connection>>,
     rx: Arc<Mutex<Receiver<String>>>,
+    room_map: Arc<Mutex<HashMap<Uuid, Vec<ManagedSocket>>>>
 ) {
     // let (mut sender, mut receiver) = socket.split();
     // let sender = Arc::new(Mutex::new(sender));
 
+    let id = Uuid::new_v4();
+
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(Mutex::new(sender));
 
+    let ms = ManagedSocket {
+        uuid: id,
+        socket: sender,
+    };
+
+    let mut rm = room_map.lock().await;
+    let room_id: Uuid = Uuid::new_v4();
+    let sockets = rm.get_mut(&room_id);
+    match sockets {
+        Some(sockets) => {
+            sockets.push(ms);
+        },
+        None => {
+            rm.insert(room_id, vec!(ms));
+        }
+    }
+
+    println!("new connection #{}", ms.uuid);
+
     while let Some(message) = receiver.next().await {
-        let mut locked_sender = sender.lock().await;
+        let mut locked_sender = ms.socket.lock().await;
         match message {
             Ok(msg) => {
                 // Simply send the received message back.
+                println!("message sent to socket #{}", ms.uuid);
+
                 if let Err(err) = locked_sender.send(msg).await {
                     eprintln!("Error sending WebSocket message: {}", err);
                 }
